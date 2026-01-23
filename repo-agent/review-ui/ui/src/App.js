@@ -1184,6 +1184,8 @@ function App() {
             <div className="dev-layout">
                 <div style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column' }}>
                     <DevSidebar 
+                        activeRepo={activeRepo}
+                        activeCount={activeList.length}
                         explorations={explorations}
                         ungrouped={ungrouped}
                         activeSandbox={activeSandbox}

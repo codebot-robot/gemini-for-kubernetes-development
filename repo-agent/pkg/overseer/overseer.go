@@ -153,7 +153,7 @@ func newOverseerSandbox(repoWatch *reviewv1alpha1.RepoWatch, name string, user *
 				},
 				"volumeMounts": []interface{}{
 					// We might need to mount secrets if envFrom isn't enough or for other tools
-					// For now, env vars should suffice for GITHUB_TOKEN and GEMINI_API_KEY
+					// For now, env vars should suffice for GITHUB_USER_TOKEN and GEMINI_API_KEY
 				},
 			},
 		},

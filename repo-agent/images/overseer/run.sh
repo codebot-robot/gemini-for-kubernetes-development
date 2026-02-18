@@ -19,11 +19,6 @@ function setupGit {
     # Hierarchy: MANUAL_PAT > OAUTH_PAT > GITHUB_USER_TOKEN
     GITHUB_USER_TOKEN="${MANUAL_PAT:-${OAUTH_PAT:-$GITHUB_USER_TOKEN}}"
 
-    # Also ensure GITHUB_TOKEN is set for tools that specifically look for it
-    if [ -n "$GITHUB_USER_TOKEN" ]; then
-        export GITHUB_TOKEN="$GITHUB_USER_TOKEN"
-    fi
-
     if [ -n "${GITHUB_USER_TOKEN}" ] && [ -n "${GITHUB_USER_ID}" ]; then
         echo "creating /root/.config/gh directory"
         mkdir -p /root/.config/gh
@@ -78,7 +73,7 @@ while true; do
   # Run gemini
   # We assume gemini is in PATH
   # We use --prompt to pass the instruction
-  # We rely on environment variables for auth (GEMINI_API_KEY, GITHUB_TOKEN, etc.)
+  # We rely on environment variables for auth (GEMINI_API_KEY, GITHUB_USER_TOKEN, etc.)
   
   # Note: If LLM_PROVIDER is set, we might need to adapt.
   # But for now we assume gemini-cli handles what it handles.

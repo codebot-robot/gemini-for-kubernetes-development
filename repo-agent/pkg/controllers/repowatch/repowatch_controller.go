@@ -244,6 +244,11 @@ func NewGithubClient(ctx context.Context, k8sClient client.Client, repoWatch *re
 	return clients.NewGitHubClientFromHTTP(tc), githubConfig, nil
 }
 
+type cachedUser struct {
+	user   *github.User
+	expiry time.Time
+}
+
 // Reconciler reconciles a RepoWatch object
 type Reconciler struct {
 	client.Client
@@ -251,6 +256,9 @@ type Reconciler struct {
 	NewGithubClient  githubClientFactory
 	RepoSandboxImage string
 	ConfigDirImage   string
+
+	userCacheMu sync.Mutex
+	userCache   map[string]cachedUser
 }
 
 //+kubebuilder:rbac:groups=review.gemini.google.com,resources=repowatches,verbs=get;list;watch;create;update;patch;delete
@@ -298,20 +306,44 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Get the current user
-	user, _, err := ghClient.Users.Get(ctx, "")
-	if err != nil {
-		// If we see this error : "GET https://api.github.com/user: 403 Resource not accessible by integration []"
-		// we are running in a github workflow with a GITHUB_TOKEN that does not have access to read user info.
-		// In this case we just log a warning and set fake user info.
-		if strings.Contains(err.Error(), "403 Resource not accessible by integration") {
-			log.Info("Warning: unable to get current user info due to insufficient permissions. Using fallback user info.")
-			user = &github.User{
-				Login: github.String("fake-user"),
+	var user *github.User
+	cacheKey := repoWatch.Namespace + "/" + repoWatch.Name
+	r.userCacheMu.Lock()
+	if r.userCache == nil {
+		r.userCache = make(map[string]cachedUser)
+	}
+	if cached, ok := r.userCache[cacheKey]; ok && time.Now().Before(cached.expiry) {
+		userCopy := *cached.user
+		user = &userCopy
+	}
+	r.userCacheMu.Unlock()
+
+	if user == nil {
+		var err error
+		user, _, err = ghClient.Users.Get(ctx, "")
+		if err != nil {
+			// If we see this error : "GET https://api.github.com/user: 403 Resource not accessible by integration []"
+			// we are running in a github workflow with a GITHUB_TOKEN that does not have access to read user info.
+			// In this case we just log a warning and set fake user info.
+			if strings.Contains(err.Error(), "403 Resource not accessible by integration") {
+				log.Info("Warning: unable to get current user info due to insufficient permissions. Using fallback user info.")
+				user = &github.User{
+					Login: github.String("fake-user"),
+				}
+			} else {
+				log.Error(err, "unable to get current user")
+				r.setAuthCondition(ctx, repoWatch, metav1.ConditionFalse, "TokenInvalid", err.Error())
+				return ctrl.Result{}, err
 			}
 		} else {
-			log.Error(err, "unable to get current user")
-			r.setAuthCondition(ctx, repoWatch, metav1.ConditionFalse, "TokenInvalid", err.Error())
-			return ctrl.Result{}, err
+			r.userCacheMu.Lock()
+			r.userCache[cacheKey] = cachedUser{
+				user:   user,
+				expiry: time.Now().Add(15 * time.Minute),
+			}
+			r.userCacheMu.Unlock()
+			userCopy := *user
+			user = &userCopy
 		}
 	}
 
@@ -906,8 +938,15 @@ func (r *Reconciler) reconcileIssues(ctx context.Context, repoWatch *reviewv1alp
 }
 
 func (r *Reconciler) isIssueMatch(issue *github.Issue, handler reviewv1alpha1.IssueHandlerSpec, repoWatch *reviewv1alpha1.RepoWatch, user *github.User) bool {
-	// Exclude explicit excludes from IssueSpec
 	if repoWatch.Spec.Issue != nil {
+		// Include explicit includes - bypass other filters
+		for _, included := range repoWatch.Spec.Issue.Issues {
+			if *issue.Number == included {
+				return true
+			}
+		}
+
+		// Exclude explicit excludes from IssueSpec
 		for _, excluded := range repoWatch.Spec.Issue.ExcludeIssues {
 			if *issue.Number == excluded {
 				return false
@@ -925,13 +964,6 @@ func (r *Reconciler) isIssueMatch(issue *github.Issue, handler reviewv1alpha1.Is
 			}
 			if !isAssigned {
 				return false
-			}
-		}
-
-		// Include explicit includes
-		for _, included := range repoWatch.Spec.Issue.Issues {
-			if *issue.Number == included {
-				return true
 			}
 		}
 	}
@@ -1137,6 +1169,7 @@ func (r *Reconciler) ensureIssueTask(ctx context.Context, repoWatch *reviewv1alp
 		"ISSUEID":      fmt.Sprintf("%d", *issue.Number),
 		"AGENT_PROMPT": prompt,
 		"HANDLER_NAME": handler.Name,
+		"PR_LABEL":     "repo-agent",
 	}
 	//params["GIT_PUSH_ENABLED"] = "true"
 	if repoWatch.Spec.Issue.LLM.Provider != "" {
@@ -1539,7 +1572,7 @@ func (r *Reconciler) reconcileDevSandboxesInternal(ctx context.Context, user *gi
 		// hashing ensures we don't exceed this limit
 		fullSuffix := fmt.Sprintf("dev-%s-%s", forkRepo, safeBranchName)
 		hashedSuffix := NameHash(fullSuffix)
-		sandboxName := fmt.Sprintf("%s-dev", hashedSuffix)
+		sandboxName := fmt.Sprintf("dev-%s", hashedSuffix)
 
 		// Check if sandbox exists
 		sandboxExists := false
@@ -1575,7 +1608,7 @@ func (r *Reconciler) reconcileDevSandboxesInternal(ctx context.Context, user *gi
 }
 
 func (r *Reconciler) createDevSandbox(ctx context.Context, user *github.User, repoWatch *reviewv1alpha1.RepoWatch, forkOwner, forkRepo, branchName, sandboxName string) error {
-	cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", forkOwner, forkRepo)
+	cloneURL := strings.TrimSuffix(repoWatch.Spec.RepoURL, ".git") + ".git"
 	originURL := fmt.Sprintf("github.com/%s/%s.git", forkOwner, forkRepo)
 
 	userLogin := user.GetLogin()
@@ -1594,7 +1627,7 @@ func (r *Reconciler) createDevSandbox(ctx context.Context, user *github.User, re
 			"sandbox-type":                       "dev",
 		},
 		CloneURL: cloneURL,
-		HTMLURL:  fmt.Sprintf("https://github.com/%s/%s", forkOwner, forkRepo),
+		HTMLURL:  strings.TrimSuffix(repoWatch.Spec.RepoURL, ".git"),
 
 		Branch:      branchName,
 		Origin:      originURL,
@@ -1640,7 +1673,7 @@ func (r *Reconciler) createDevSandbox(ctx context.Context, user *github.User, re
 	}
 
 	params := map[string]string{
-		"REPO_URL":          opts.HTMLURL, // HTMLURL is https://github.com/owner/repo
+		"REPO_URL":          opts.CloneURL, // CloneURL is the upstream repository URL
 		"BRANCH_NAME":       branchName,
 		"GITHUB_USER_LOGIN": opts.UserLogin,
 		"GITHUB_USER_EMAIL": opts.UserEmail,

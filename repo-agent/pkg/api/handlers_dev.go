@@ -287,16 +287,17 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "RepoURL not found in RepoWatch"})
 		return
 	}
+	repoURL = strings.TrimSuffix(repoURL, ".git") + ".git"
 
 	repoParts := strings.Split(strings.TrimSuffix(repoURL, ".git"), "/")
 	repoName := repoParts[len(repoParts)-1]
 
-	forkCloneURL := fmt.Sprintf("https://github.com/%s/%s.git", namespace, repoName)
+	cloneURL := repoURL
 	if req.BaseBranch != "" {
-		forkCloneURL = fmt.Sprintf("%s#refs/heads/%s", forkCloneURL, req.BaseBranch)
+		cloneURL = fmt.Sprintf("%s#refs/heads/%s", repoURL, req.BaseBranch)
 	}
 
-	forkHTMLURL := fmt.Sprintf("https://github.com/%s/%s", namespace, repoName)
+	htmlURL := strings.TrimSuffix(repoURL, ".git")
 	originURL := fmt.Sprintf("github.com/%s/%s.git", namespace, repoName)
 
 	githubSecretName, _, _ := unstructured.NestedString(rw.Object, "spec", "githubSecretName")
@@ -305,6 +306,8 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 	llmProvider, _, _ := unstructured.NestedString(rw.Object, "spec", "dev", "llm", "provider")
 	image, _, _ := unstructured.NestedString(rw.Object, "spec", "dev", "image")
 	devContainerConfigRef, _, _ := unstructured.NestedString(rw.Object, "spec", "dev", "devcontainerConfigRef")
+	dindSupport, _, _ := unstructured.NestedString(rw.Object, "spec", "dev", "dindSupport")
+	workspaceDiskSize, _, _ := unstructured.NestedString(rw.Object, "spec", "dev", "workspaceDiskSize")
 
 	// Fetch user info from secret
 	var userName, userEmail string
@@ -335,7 +338,7 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 	h := fnv.New32a()
 	h.Write([]byte(fullSuffix))
 	hashedSuffix := fmt.Sprintf("%08x", h.Sum32())
-	sandboxName := fmt.Sprintf("%s-dev", hashedSuffix)
+	sandboxName := fmt.Sprintf("dev-%s", hashedSuffix)
 
 	// Check if branch is in excludeBranches and remove it if so
 	excludeBranches, found, err := unstructured.NestedStringSlice(rw.Object, "spec", "dev", "excludeBranches")
@@ -382,8 +385,8 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 			"sandbox-type":                       "dev",
 		},
 		Annotations: annotations,
-		CloneURL:    forkCloneURL,
-		HTMLURL:     forkHTMLURL,
+		CloneURL:    cloneURL,
+		HTMLURL:     htmlURL,
 
 		Branch:      branchName,
 		Origin:      originURL,
@@ -397,8 +400,7 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 		LLMAPIKeySecretName: apiKeySecretRef,
 		Prompt:              req.Prompt,
 
-		GithubSecretName: githubSecretName,
-
+		GithubSecretName:      githubSecretName,
 		DevcontainerConfigRef: devContainerConfigRef,
 		Image:                 image,
 
@@ -407,9 +409,11 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 
 		ServiceAccountName: "issue-sandbox",
 
-		IdeaID:         req.IdeaID,
-		Approach:       req.Approach,
-		ParentApproach: req.ParentApproach,
+		DindSupport:       dindSupport,
+		WorkspaceDiskSize: workspaceDiskSize,
+		IdeaID:            req.IdeaID,
+		Approach:          req.Approach,
+		ParentApproach:    req.ParentApproach,
 	}
 
 	sb, svc := sandbox.NewDevSandbox(opts)
@@ -439,7 +443,7 @@ func (s *Server) createDevSandbox(c *gin.Context) {
 
 	// Create initial dev-setup task
 	taskParams := map[string]string{
-		"REPO_URL":          forkHTMLURL,
+		"REPO_URL":          repoURL,
 		"BRANCH_NAME":       branchName,
 		"GITHUB_USER_LOGIN": namespace,
 		"GITHUB_USER_EMAIL": userEmail,

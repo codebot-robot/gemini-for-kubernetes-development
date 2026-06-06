@@ -5,16 +5,20 @@ metadata:
 spec:
   repoURL: https://github.com/GoogleCloudPlatform/k8s-config-connector
   robotAccount: codebot-robot
-  maxActiveReviews: 3
-  maxActiveIssues: 3
+  maxActiveReviews: 20
+  maxActiveIssues: 11
   chores:
     mode: enabled
     #include:
     #  - KCC Release Scheduler
   geminiAPIKeySecretName: gemini-vscode-tokens
   ephemeralStorage: 10Gi
-  image: ghcr.io/gke-labs/gemini-for-kubernetes-development/generic-golang:latest
+  image: ghcr.io/gke-labs/gemini-for-kubernetes-development/factory-golang:latest
   configdirRef: kcc-agents
+  workspaceDiskSize: 40Gi
+  secrets:
+    - name: projectaccess
+      mountPath: "/etc/pakey"
   repo:
     issueMode: enabled
     prMode: enabled

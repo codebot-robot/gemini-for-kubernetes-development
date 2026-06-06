@@ -3,6 +3,17 @@ set -e
 set -o pipefail
 set -x
 
+if [ "${DISABLE_GITHUB_PROXY:-false}" != "true" ]; then
+    if [ ! -f /usr/local/bin/gh ]; then
+        echo "creating gh wrapper script"
+        cat <<'EOF' > /usr/local/bin/gh
+#!/bin/bash
+HTTPS_PROXY=http://github-portal.overseer-system.svc.cluster.local SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" /usr/bin/gh "$@"
+EOF
+        chmod +x /usr/local/bin/gh
+    fi
+fi
+
 # It expects the following environment variables to be set:
 # - GEMINI_API_KEY
 # - GITHUB_USER_TOKEN
@@ -82,7 +93,11 @@ function setupGitRepos {
         # Ensure we have all branches from upstream
         (cd "/workspaces/${REPO_NAME}" && git fetch upstream && git fetch origin)
     else
-        echo "repository already exists, fetching latest changes..."
+        echo "repository already exists, cleaning up previous git state and fetching latest changes..."
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd)
         (cd "/workspaces/${REPO_NAME}" && git fetch origin && git fetch upstream)
     fi
 }
@@ -90,6 +105,11 @@ function setupGitRepos {
 function checkoutBranch {
     echo "Running checkoutBranch..."
     cd "/workspaces/${REPO_NAME}"
+    git rebase --abort 2>/dev/null || true
+    git merge --abort 2>/dev/null || true
+    git cherry-pick --abort 2>/dev/null || true
+    git reset --hard HEAD
+    git clean -fd
     
     # Check if branch exists locally
     if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then

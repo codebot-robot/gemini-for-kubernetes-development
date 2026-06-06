@@ -67,6 +67,17 @@ EOF
     echo "running gh auth setup-git"
     gh auth setup-git
 
+    if [ "${DISABLE_GITHUB_PROXY:-false}" != "true" ]; then
+        if [ ! -f /usr/local/bin/gh ]; then
+            echo "creating gh wrapper script"
+            cat <<'EOF' > /usr/local/bin/gh
+#!/bin/bash
+HTTPS_PROXY=http://github-portal.overseer-system.svc.cluster.local:80 SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" GIT_SSL_CAINFO="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" /usr/bin/gh "$@"
+EOF
+            chmod +x /usr/local/bin/gh
+        fi
+    fi
+
     echo "Configuring global git ignore"
     git config --global core.excludesfile /root/.gitignore_global
     cat <<EOF > /root/.gitignore_global
@@ -82,6 +93,12 @@ function setupGitRepos {
     if [ ! -d "/workspaces/${REPO_NAME}" ]; then
         echo "cloning repository"
         (cd /workspaces/ && git clone ${CLONE_URL})
+    else
+        echo "repository already exists, cleaning up previous git state..."
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd)
     fi
 
     echo "running gh repo fork --remote"
@@ -99,14 +116,25 @@ function setupGitRepos {
 
     if [ -n "$PRID" ] && [ "$PRID" != "null" ]; then
         echo "Checking out PR $PRID"
-        (cd "/workspaces/${REPO_NAME}" && gh pr checkout "$PRID")
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd && /usr/bin/gh pr checkout "$PRID")
     elif [ -n "$BRANCH_NAME" ]; then
         echo "Checking out branch $BRANCH_NAME"
-        (cd "/workspaces/${REPO_NAME}" && git checkout "$BRANCH_NAME")
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd && git checkout "$BRANCH_NAME")
     fi
 
     echo "waiting for checkout to be ready (branch check)"
     (cd "/workspaces/${REPO_NAME}" && git branch --show-current)
+
+    echo "recording initial HEAD"
+    pushd "/workspaces/${REPO_NAME}" > /dev/null
+    OLD_HEAD=$(git rev-parse HEAD)
+    popd > /dev/null
 }
 
 function configureGemini {
@@ -172,14 +200,26 @@ function commitAndPush {
     echo "Running commitAndPush..."
     pushd "/workspaces/${REPO_NAME}" > /dev/null
     
+    NEW_HEAD=$(git rev-parse HEAD)
+
     # check if there are changes
     if [ -z "$(git status --porcelain)" ]; then 
-        echo "No changes to commit."
+        if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+            echo "HEAD has changed (likely rebased by agent). Pushing changes..."
+            git push --force origin HEAD
+        else
+            echo "No changes to commit."
+        fi
     else
         echo "Changes detected, committing..."
         git add .
         git commit -m "Agent iteration: Apply changes"
-        git push origin HEAD
+        if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+            echo "HEAD has changed and working directory has changes. Pushing changes..."
+            git push --force origin HEAD
+        else
+            git push origin HEAD
+        fi
     fi
     popd > /dev/null
 }

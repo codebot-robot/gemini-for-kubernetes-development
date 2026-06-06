@@ -1,10 +1,11 @@
-
-Creating a task to review a PR:
+Queueing a PR Review task:
 ```bash
-overseer-cli pr --number <pr-number> --task review
-```
-
-Submitting a completed PR review:
-```bash
-overseer-cli pr --number <pr-number> --submit
+cat <<EOF > overseer/queues/incoming/task-pr-<pr-number>-review.yaml
+type: pr-review
+url: https://github.com/<owner>/<repo>/pull/<pr-number>
+number: <pr-number>
+priority: medium
+createdAt: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+status: Pending
+EOF
 ```

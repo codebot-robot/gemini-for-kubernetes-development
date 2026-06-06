@@ -18,6 +18,7 @@ package overseer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -133,11 +134,7 @@ func newOverseerSandboxFromOverseer(o *overseerv1alpha1.Overseer, name, namespac
 		},
 		map[string]interface{}{
 			"name":  "GITHUB_API_URL",
-			"value": "http://github-portal.overseer-system.svc.cluster.local",
-		},
-		map[string]interface{}{
-			"name":  "GH_HOST",
-			"value": "github-portal.overseer-system.svc.cluster.local",
+			"value": "http://github-portal.overseer-system.svc.cluster.local/",
 		},
 		map[string]interface{}{
 			"name":  "GEMINI_CLI_TRUST_WORKSPACE",
@@ -167,6 +164,14 @@ func newOverseerSandboxFromOverseer(o *overseerv1alpha1.Overseer, name, namespac
 			"name":  "POLL_INTERVAL",
 			"value": o.Spec.PollInterval,
 		},
+		map[string]interface{}{
+			"name":  "EPHEMERAL_STORAGE",
+			"value": o.Spec.EphemeralStorage,
+		},
+		map[string]interface{}{
+			"name":  "ALLOW_GEMINI_ORCHESTRATION",
+			"value": fmt.Sprintf("%t", o.Spec.EnableGeminiOrchestrator),
+		},
 	}
 
 	if o.Spec.Chores != nil && o.Spec.Chores.Mode != "" {
@@ -193,6 +198,49 @@ func newOverseerSandboxFromOverseer(o *overseerv1alpha1.Overseer, name, namespac
 			env = append(env, map[string]interface{}{
 				"name":  "ISSUE_MODE",
 				"value": o.Spec.Repo.IssueMode,
+			})
+		}
+	}
+
+	if o.Spec.MaxActiveReviews != nil {
+		env = append(env, map[string]interface{}{
+			"name":  "MAX_ACTIVE_REVIEWS",
+			"value": fmt.Sprintf("%d", *o.Spec.MaxActiveReviews),
+		})
+	}
+	if o.Spec.MaxActiveIssues != nil {
+		env = append(env, map[string]interface{}{
+			"name":  "MAX_ACTIVE_ISSUES",
+			"value": fmt.Sprintf("%d", *o.Spec.MaxActiveIssues),
+		})
+	}
+	if o.Spec.WorkspaceDiskSize != "" {
+		env = append(env, map[string]interface{}{
+			"name":  "WORKSPACE_DISK_SIZE",
+			"value": o.Spec.WorkspaceDiskSize,
+		})
+	}
+	if o.Spec.Image != "" {
+		env = append(env, map[string]interface{}{
+			"name":  "FACTORY_IMAGE",
+			"value": o.Spec.Image,
+		})
+	}
+	if len(o.Spec.Secrets) > 0 {
+		secretsJSON, err := json.Marshal(o.Spec.Secrets)
+		if err == nil {
+			env = append(env, map[string]interface{}{
+				"name":  "FACTORY_SECRETS",
+				"value": string(secretsJSON),
+			})
+		}
+	}
+	if len(o.Spec.Env) > 0 {
+		envJSON, err := json.Marshal(o.Spec.Env)
+		if err == nil {
+			env = append(env, map[string]interface{}{
+				"name":  "FACTORY_ENV",
+				"value": string(envJSON),
 			})
 		}
 	}
@@ -356,6 +404,39 @@ func newOverseerSandboxFromOverseer(o *overseerv1alpha1.Overseer, name, namespac
 			"value": "/etc/tokenscript",
 		})
 		mainContainer["env"] = envList
+	}
+
+	// Inject CA cert volume
+	{
+		volume := map[string]interface{}{
+			"name": "ca-cert",
+			"secret": map[string]interface{}{
+				"secretName": "github-portal-ca",
+				"optional":   true,
+			},
+		}
+
+		var volumes []interface{}
+		if v, ok := podSpec["volumes"]; ok {
+			volumes = v.([]interface{})
+		}
+		volumes = append(volumes, volume)
+		podSpec["volumes"] = volumes
+
+		volumeMount := map[string]interface{}{
+			"name":      "ca-cert",
+			"mountPath": "/etc/github-portal/ca",
+			"readOnly":  true,
+		}
+
+		containers := podSpec["containers"].([]interface{})
+		mainContainer := containers[0].(map[string]interface{})
+		var volumeMounts []interface{}
+		if vm, ok := mainContainer["volumeMounts"]; ok {
+			volumeMounts = vm.([]interface{})
+		}
+		volumeMounts = append(volumeMounts, volumeMount)
+		mainContainer["volumeMounts"] = volumeMounts
 	}
 
 	u := &unstructured.Unstructured{

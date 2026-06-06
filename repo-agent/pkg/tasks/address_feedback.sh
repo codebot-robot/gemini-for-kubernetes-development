@@ -3,6 +3,17 @@ set -e
 set -o pipefail
 #set -x
 
+if [ "${DISABLE_GITHUB_PROXY:-false}" != "true" ]; then
+    if [ ! -f /usr/local/bin/gh ]; then
+        echo "creating gh wrapper script"
+        cat <<'EOF' > /usr/local/bin/gh
+#!/bin/bash
+HTTPS_PROXY=http://github-portal.overseer-system.svc.cluster.local:80 SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" GIT_SSL_CAINFO="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" /usr/bin/gh "$@"
+EOF
+        chmod +x /usr/local/bin/gh
+    fi
+fi
+
 # It expects the following environment variables to be set:
 # - GEMINI_API_KEY
 # - GITHUB_USER_TOKEN
@@ -81,7 +92,11 @@ function setupGitRepos {
         echo "cloning repository"
         (cd /workspaces/ && git clone ${CLONE_URL})
     else
-        echo "repository already exists"
+        echo "repository already exists, cleaning up previous git state..."
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd)
         # Optional: fetch latest changes
         (cd "/workspaces/${REPO_NAME}" && git fetch origin)
     fi
@@ -96,7 +111,10 @@ function setupGitRepos {
 function checkoutPRBranch {
     echo "Running checkoutPRBranch..."
     echo "checking out PR #${PR_NUMBER}"
-    (cd "/workspaces/${REPO_NAME}" && gh pr checkout ${PR_NUMBER})
+    (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+    (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+    (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+    (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd && /usr/bin/gh pr checkout ${PR_NUMBER})
 }
 
 function configureGemini {

@@ -1150,6 +1150,7 @@ func (r *Reconciler) createIssueSandbox(ctx context.Context, user *github.User, 
 			Replicas:              1,
 			ServiceAccountName:    "issue-sandbox",
 			WorkspaceDiskSize:     repoWatch.Spec.Issue.WorkspaceDiskSize,
+			DisableGitHubProxy:    true,
 		},
 		DindSupport:   dindSupport,
 		LLMExtensions: repoWatch.Spec.Issue.LLM.Extensions,
@@ -1211,11 +1212,25 @@ func (r *Reconciler) ensureIssueTask(ctx context.Context, repoWatch *reviewv1alp
 		return err
 	}
 
+	draftPR := false
+	if repoWatch.Spec.Issue.RobotAccount == "" {
+		if repoWatch.Spec.Issue.DraftPR != nil {
+			draftPR = *repoWatch.Spec.Issue.DraftPR
+		} else {
+			draftPR = true
+		}
+	} else {
+		draftPR = false
+	}
+
 	params := map[string]string{
 		"ISSUEID":      fmt.Sprintf("%d", *issue.Number),
 		"AGENT_PROMPT": prompt,
 		"HANDLER_NAME": handler.Name,
 		"PR_LABEL":     "repo-agent",
+	}
+	if draftPR {
+		params["DRAFT_PR"] = "true"
 	}
 	//params["GIT_PUSH_ENABLED"] = "true"
 	if repoWatch.Spec.Issue.LLM.Provider != "" {
@@ -1325,6 +1340,7 @@ func (r *Reconciler) createReviewSandboxForPR(ctx context.Context, user *github.
 				}
 				return repoWatch.Spec.Review.DindSupport
 			}(),
+			DisableGitHubProxy: true,
 		},
 		PRNumber:          *pr.Number,
 		PRTitle:           *pr.Title,
@@ -2111,12 +2127,12 @@ func (r *Reconciler) reconcilePRFailures(ctx context.Context, repoWatch *reviewv
 
 	// 2. Check CheckRuns
 	if !failed {
-		checkRuns, _, err := ghClient.Checks.ListCheckRunsForRef(ctx, owner, repo, sha, nil)
+		checkRuns, err := listAllCheckRuns(ctx, ghClient, owner, repo, sha)
 		if err != nil {
 			log.Error(err, "unable to list check runs", "sha", sha)
 			return nil
 		}
-		for _, cr := range checkRuns.CheckRuns {
+		for _, cr := range checkRuns {
 			if cr.GetConclusion() == "failure" || cr.GetConclusion() == "timed_out" || cr.GetConclusion() == "action_required" {
 				failed = true
 				break
@@ -2338,4 +2354,25 @@ func (r *Reconciler) reconcileSandboxPodStatus(ctx context.Context, sandbox *uns
 	}
 
 	return sandboxStatus, nil
+}
+
+func listAllCheckRuns(ctx context.Context, client *github.Client, owner, repo, ref string) ([]*github.CheckRun, error) {
+	var allRuns []*github.CheckRun
+	opts := &github.ListCheckRunsOptions{
+		ListOptions: github.ListOptions{
+			PerPage: 200,
+		},
+	}
+	for {
+		runs, resp, err := client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, opts)
+		if err != nil {
+			return nil, err
+		}
+		allRuns = append(allRuns, runs.CheckRuns...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allRuns, nil
 }

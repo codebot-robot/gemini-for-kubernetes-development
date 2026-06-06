@@ -1,4 +1,4 @@
-FROM golang:1.25.7 AS builder
+FROM golang:1.26.2 AS builder
 
 WORKDIR /app
 # Copy the Go Modules manifests
@@ -16,15 +16,18 @@ COPY dev/tools/go.mod dev/tools/go.mod
 COPY dev/tools/go.sum dev/tools/go.sum
 COPY services/container-registry/go.mod services/container-registry/go.mod
 COPY services/container-registry/go.sum services/container-registry/go.sum
+COPY factory/go.mod factory/go.mod
+COPY factory/go.sum factory/go.sum
 
 # Copy the source code
 COPY agentsandboxes/ agentsandboxes/
 COPY repo-agent/pkg/ repo-agent/pkg/
 COPY repo-agent/api/ repo-agent/api/
 COPY overseer/ overseer/
+COPY factory/ factory/
 
-WORKDIR /app/overseer
-RUN go build -o overseer-cli ./cmd/overseer-cli/main.go
+WORKDIR /app/factory
+RUN go build -o factory ./main.go
 
 FROM node:20-slim
 
@@ -37,6 +40,7 @@ RUN apt-get update && \
     jq \
     gh \
     procps \
+    tmux \
     ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
@@ -50,9 +54,12 @@ RUN npm install -g @google/gemini-cli
 
 WORKDIR /workspaces
 
-COPY --from=builder /app/overseer/overseer-cli /usr/local/bin/overseer-cli
+ENV FACTORY_LOGS=/workspaces/logs/factory/
+
+COPY --from=builder /app/factory/factory /usr/local/bin/factory
 COPY overseer/images/overseer/run.sh /workspaces/run.sh
+COPY overseer/images/overseer/summarize.sh /workspaces/summarize.sh
 COPY overseer/images/overseer/prompt/ /workspaces/prompt/
-RUN chmod +x /workspaces/run.sh
+RUN chmod +x /workspaces/run.sh /workspaces/summarize.sh
 
 ENTRYPOINT ["/workspaces/run.sh"]

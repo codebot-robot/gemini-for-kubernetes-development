@@ -1,10 +1,12 @@
 
-Creating a task to investigate PR failures:
+Rerunning failed CI checks due to transient infrastructure/flake failure:
 ```bash
-overseer-cli pr --number <pr-number> --task investigate-failures
-```
+# 1. Find the failed workflow run ID for the PR head commit
+gh run list -R $REPO_URL --commit <commit-sha>
 
-Creating a task to resolve merge conflicts:
-```bash
-overseer-cli pr --number <pr-number> --task iterate --prompt "Please resolve merge conflicts in this PR by rebasing onto the latest master/main branch and resolving any conflicts that arise."
+# 2. Retrigger only the failed checks for that run
+gh run rerun <run-id> --failed -R $REPO_URL
+
+# 3. Comment on the PR
+gh pr comment <pr-number> -R $REPO_URL --body "🤖 Retriggering failed CI checks due to transient infrastructure/flake failure."
 ```

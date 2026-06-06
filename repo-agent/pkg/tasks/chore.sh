@@ -2,6 +2,17 @@
 set -e
 set -x
 
+if [ "${DISABLE_GITHUB_PROXY:-false}" != "true" ]; then
+    if [ ! -f /usr/local/bin/gh ]; then
+        echo "creating gh wrapper script"
+        cat <<'EOF' > /usr/local/bin/gh
+#!/bin/bash
+HTTPS_PROXY=http://github-portal.overseer-system.svc.cluster.local:80 SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" GIT_SSL_CAINFO="${SSL_CERT_FILE:-/etc/github-portal/ca/tls.crt}" /usr/bin/gh "$@"
+EOF
+        chmod +x /usr/local/bin/gh
+    fi
+fi
+
 export REPO_NAME="{{ .RepoName }}"
 export REPO_OWNER="{{ .RepoOwner }}"
 export CLONE_URL="{{ .CloneURL }}"
@@ -60,7 +71,12 @@ EOF
 function setupGitRepos {
     echo "Running setupGitRepos..."
     if [ -d "/workspaces/${REPO_NAME}" ]; then
-        echo "Repository already exists at /workspaces/${REPO_NAME}"
+        echo "Repository already exists at /workspaces/${REPO_NAME}, cleaning up previous git state..."
+        (cd "/workspaces/${REPO_NAME}" && git rebase --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git merge --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git cherry-pick --abort 2>/dev/null || true)
+        (cd "/workspaces/${REPO_NAME}" && git reset --hard HEAD && git clean -fd)
+        (cd "/workspaces/${REPO_NAME}" && git fetch origin)
         return
     fi
     
@@ -222,6 +238,11 @@ function runChore {
     BRANCH_NAME="chore/${SLUGIFIED_NAME}-$(date +%Y%m%d-%H%M%S)"
     
     # start from base branch
+    git rebase --abort 2>/dev/null || true
+    git merge --abort 2>/dev/null || true
+    git cherry-pick --abort 2>/dev/null || true
+    git reset --hard HEAD
+    git clean -fd
     git checkout "${BASE_BRANCH}"
     git checkout -b "${BRANCH_NAME}"
 

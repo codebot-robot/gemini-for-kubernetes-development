@@ -46,6 +46,21 @@ spec:
                 type: object
               configdirRef:
                 type: string
+              enableGeminiOrchestrator:
+                default: false
+                type: boolean
+              env:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
               ephemeralStorage:
                 default: 10Gi
                 type: string
@@ -122,6 +137,18 @@ spec:
                 type: object
               robotAccount:
                 type: string
+              secrets:
+                items:
+                  properties:
+                    mountPath:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - mountPath
+                  - name
+                  type: object
+                type: array
               workspaceDiskSize:
                 default: 10Gi
                 type: string

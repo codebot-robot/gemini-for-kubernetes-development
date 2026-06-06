@@ -1,6 +1,6 @@
 # --------------------------------
 # Build the repo-sandbox binary
-FROM golang:1.25.7 AS build-repo-sandbox
+FROM golang:1.26.2 AS build-repo-sandbox
 WORKDIR /app
 
 # Copy the Go Modules manifests
@@ -18,6 +18,8 @@ COPY dev/tools/go.mod dev/tools/go.mod
 COPY dev/tools/go.sum dev/tools/go.sum
 COPY services/container-registry/go.mod services/container-registry/go.mod
 COPY services/container-registry/go.sum services/container-registry/go.sum
+COPY factory/go.mod factory/go.mod
+COPY factory/go.sum factory/go.sum
 
 # Copy the source code
 COPY agentsandboxes/ agentsandboxes/
@@ -34,20 +36,20 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -v -o /repo-sandbox ./cmd
 # --------------------------------
 
 # Build the gh CLI
-FROM golang:1.25.7 AS build-gh
+FROM golang:1.26.2 AS build-gh
 RUN GOBIN=/bin go install github.com/cli/cli/v2/cmd/gh@v2.82.1
 
 
 # --------------------------------
 
 # Main image
-FROM golang:1.25.7
+FROM golang:1.26.2
 ENV GOTOOLCHAIN=auto
 
 # We want a functional python, because gemini-cli likes to use python
 RUN apt-get update && apt-get install -y python3 python3-pip python3-yaml python-is-python3 python3-venv
 
-RUN apt-get update && apt-get install -y git tmux nodejs npm sudo curl apt-transport-https ca-certificates gnupg jq
+RUN apt-get update && apt-get install -y git tmux nodejs npm sudo curl apt-transport-https ca-certificates gnupg jq ripgrep
 
 # Install Google Cloud CLI
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
@@ -64,6 +66,16 @@ COPY --from=build-repo-sandbox /repo-sandbox /repo-agent/repo-sandbox
 COPY --from=build-gh /bin/gh /bin/gh
 
 RUN ln -sf /usr/local/go/bin/go /usr/local/bin/go
+
+RUN apt-get install -y vim less 
+
+# Install setup-envtest and download assets
+RUN go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22 && \
+    $(go env GOPATH)/bin/setup-envtest use --print  env
+
+# (Optional) Export KUBEBUILDER_ASSETS so it's available for 'go test' automatically.
+# The path below is the default location setup-envtest extracts the binaries to.
+ENV KUBEBUILDER_ASSETS=/root/.local/share/kubebuilder-envtest/k8s/1.36.0-linux-amd64
 
 WORKDIR /workspaces
 ENTRYPOINT ["/repo-agent/repo-sandbox", "agent"]

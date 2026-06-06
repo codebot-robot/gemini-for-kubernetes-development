@@ -59,6 +59,9 @@ type DevSandboxOptions struct {
 
 	DindSupport string
 
+	// DisableGitHubProxy specifies whether to disable the GitHub proxy wrapper.
+	DisableGitHubProxy bool
+
 	// WorkspaceDiskSize specifies the disk size for the workspace PVC.
 	WorkspaceDiskSize string
 
@@ -66,6 +69,22 @@ type DevSandboxOptions struct {
 	IdeaID         string
 	Approach       string
 	ParentApproach string
+
+	// Secrets is a list of secrets to mount in all development sandboxes.
+	Secrets []SecretMount
+
+	// Env is a list of environment variables to inject in all development sandboxes.
+	Env []EnvVar
+}
+
+type SecretMount struct {
+	Name      string
+	MountPath string
+}
+
+type EnvVar struct {
+	Name  string
+	Value string
 }
 
 // NewDevSandbox creates a new DevSandbox.

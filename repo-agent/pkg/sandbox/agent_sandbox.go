@@ -177,11 +177,12 @@ func NewAgentSandbox(opt AgentSandboxOptions) (*unstructured.Unstructured, *core
 			"value": "true",
 		},
 	}
-
-	if opt.GHHost != "" {
-		env = append(env, map[string]interface{}{"name": "GH_HOST", "value": opt.GHHost})
+	for _, e := range opt.Env {
+		env = append(env, map[string]interface{}{
+			"name":  e.Name,
+			"value": e.Value,
+		})
 	}
-
 	env = append(env, buildLLMEnvVars(opt.DevSandboxOptions)...)
 
 	env = append(env,
@@ -191,13 +192,18 @@ func NewAgentSandbox(opt AgentSandboxOptions) (*unstructured.Unstructured, *core
 		map[string]interface{}{"name": "ENVBUILDER_CACHE_REPO", "value": "registry.repo-agent-system.svc.cluster.local:5000/envbuilder-cache"},
 		map[string]interface{}{"name": "ENVBUILDER_DEVCONTAINER_DIR", "value": "/"},
 		map[string]interface{}{"name": "ENVBUILDER_INIT_SCRIPT", "value": RepoSandboxBinary + " dev-daemon"},
-		map[string]interface{}{"name": "ENVBUILDER_IGNORE_PATHS", "value": "/var/run,/product_uuid,/product_name,/tokens,/repo-agent/"},
+		map[string]interface{}{"name": "ENVBUILDER_IGNORE_PATHS", "value": "/var/run,/product_uuid,/product_name,/tokens,/repo-agent/,/etc/github-portal/ca"},
 		map[string]interface{}{"name": "DIND_SUPPORT", "value": opt.DindSupport},
 		map[string]interface{}{"name": "GOCACHE", "value": GoCachePath},
 		map[string]interface{}{"name": "GOMODCACHE", "value": GoModCachePath},
 		map[string]interface{}{"name": "TMPDIR", "value": TmpDirPath},
 		map[string]interface{}{"name": "GOTMPDIR", "value": TmpDirPath},
+		map[string]interface{}{"name": "SSL_CERT_FILE", "value": "/opt/repo-agent/ca/tls.crt"},
 	)
+
+	if opt.DisableGitHubProxy {
+		env = append(env, map[string]interface{}{"name": "DISABLE_GITHUB_PROXY", "value": "true"})
+	}
 
 	if opt.OverseerName != "" {
 		env = append(env, map[string]interface{}{"name": "OVERSEER_NAME", "value": opt.OverseerName})
@@ -316,6 +322,7 @@ func NewAgentSandbox(opt AgentSandboxOptions) (*unstructured.Unstructured, *core
 								"command": []interface{}{"/repo-agent/repo-sandbox", "inject", "--path", "/opt/repo-agent"},
 								"volumeMounts": []interface{}{
 									map[string]interface{}{"name": "agent-bin", "mountPath": "/opt/repo-agent"},
+									map[string]interface{}{"name": "ca-cert", "mountPath": "/etc/github-portal/ca", "readOnly": true},
 								},
 							})
 							return containers
@@ -366,6 +373,13 @@ func NewAgentSandbox(opt AgentSandboxOptions) (*unstructured.Unstructured, *core
 									if opt.DindSupport != "" && opt.DindSupport != DindSupportNone {
 										vm = append(vm, map[string]interface{}{"name": "docker", "mountPath": "/var/lib/docker"})
 									}
+									vm = append(vm, map[string]interface{}{"name": "ca-cert", "mountPath": "/etc/github-portal/ca", "readOnly": true})
+									for _, secret := range opt.Secrets {
+										vm = append(vm, map[string]interface{}{
+											"name":      secret.Name + "-vol",
+											"mountPath": secret.MountPath,
+										})
+									}
 									return vm
 								}(),
 								"ports": []interface{}{
@@ -405,6 +419,21 @@ func NewAgentSandbox(opt AgentSandboxOptions) (*unstructured.Unstructured, *core
 								v = append(v, map[string]interface{}{
 									"name":     "docker",
 									"emptyDir": map[string]interface{}{},
+								})
+							}
+							v = append(v, map[string]interface{}{
+								"name": "ca-cert",
+								"secret": map[string]interface{}{
+									"secretName": "github-portal-ca",
+									"optional":   true,
+								},
+							})
+							for _, secret := range opt.Secrets {
+								v = append(v, map[string]interface{}{
+									"name": secret.Name + "-vol",
+									"secret": map[string]interface{}{
+										"secretName": secret.Name,
+									},
 								})
 							}
 							return v

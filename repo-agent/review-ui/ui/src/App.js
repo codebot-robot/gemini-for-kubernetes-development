@@ -295,7 +295,7 @@ function App() {
             setLastUpdated(new Date());
           })
           .catch(err => console.error(`Failed to fetch dev sandboxes for ${activeRepo.name}:`, err));
-    } else if (activeSubTab.name) {
+    } else if (activeSubTab?.name) {
         if (!merge) setPrs([]);
         let url = `/api/repo/${activeRepo.name}/issues/${activeSubTab.name}`;
         if (activeSubTab.name === 'issues') {
@@ -1177,6 +1177,8 @@ function App() {
             <div className="dev-layout">
                 <div style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column' }}>
                     <DevSidebar 
+                        activeRepo={activeRepo}
+                        activeCount={activeList.length}
                         explorations={explorations}
                         ungrouped={ungrouped}
                         activeSandbox={activeSandbox}
@@ -1288,9 +1290,12 @@ function App() {
         />
       );
     }
+    return null;
   };
 
-  const renderDashboard = () => (
+  const renderDashboard = () => {
+    const isActiveTab = (tabName) => activeSubTab.name === tabName ? 'active' : '';
+    return (
     <>
       <nav className="repo-tabs">
         {repos.map(repo => (
@@ -1316,7 +1321,7 @@ function App() {
             <nav className="sub-tabs">
             {repos.find(r => r.name === activeRepo.name)?.review && (
                 <button
-                className={`sub-tab-btn ${activeSubTab.name === 'review' ? 'active' : ''}`}
+                className={`sub-tab-btn ${isActiveTab('review')}`}
                 onClick={() => setActiveSubTab({ repo: activeRepo.name, name: 'review' })}
                 >
                 Review
@@ -1332,7 +1337,7 @@ function App() {
             )}
             {repos.find(r => r.name === activeRepo.name)?.dev && (
                 <button
-                className={`sub-tab-btn ${activeSubTab.name === 'dev' ? 'active' : ''}`}
+                className={`sub-tab-btn ${isActiveTab('dev')}`}
                 onClick={() => setActiveSubTab({ repo: activeRepo.name, name: 'dev' })}
                 >
                 Dev
@@ -1359,6 +1364,7 @@ function App() {
       </main>
     </>
   );
+  };
 
   if (isLoadingAuth) return <div className="App"><header className="App-header"><h1>Loading...</h1></header></div>;
 

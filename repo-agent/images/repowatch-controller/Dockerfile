@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.25.7 as builder
+FROM golang:1.26.2 as builder
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -17,6 +17,8 @@ COPY dev/tools/go.mod dev/tools/go.mod
 COPY dev/tools/go.sum dev/tools/go.sum
 COPY services/container-registry/go.mod services/container-registry/go.mod
 COPY services/container-registry/go.sum services/container-registry/go.sum
+COPY factory/go.mod factory/go.mod
+COPY factory/go.sum factory/go.sum
 
 # Copy the source code
 COPY agentsandboxes/ agentsandboxes/

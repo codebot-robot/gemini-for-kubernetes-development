@@ -54,6 +54,8 @@ type OverseerReconciler struct {
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=pods;events,verbs=get;list
+//+kubebuilder:rbac:groups="",resources=pods/portforward,verbs=create
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=custom.agents.x-k8s.io,resources=sandboxtasks,verbs=get;list;watch;create;update;patch;delete
@@ -295,7 +297,7 @@ func (r *OverseerReconciler) ensureOverseerRBAC(ctx context.Context, o *overseer
 }
 
 func (r *OverseerReconciler) ensureSecrets(ctx context.Context, o *overseerv1alpha1.Overseer, targetNamespace string) error {
-	secretsToCopy := []string{o.Spec.RobotAccount, o.Spec.GeminiAPIKeySecretName, "tokenscript"}
+	secretsToCopy := []string{o.Spec.RobotAccount, o.Spec.GeminiAPIKeySecretName, "tokenscript", "github-portal-ca"}
 	for _, name := range secretsToCopy {
 		if name == "" {
 			continue
